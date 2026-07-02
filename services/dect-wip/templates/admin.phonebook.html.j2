@@ -1,13 +1,13 @@
-{% set path = 'phonebook' %}
+{% set admin_path = 'phonebook' %}
 
-{% extends 'base.html.j2' %}
+{% extends 'admin.base.html.j2' %}
 
-{% block content %}
+{% block admincontent %}
 
 <!-- Überschrift -->
 
     <div class="container-xl mt-3 mb-3">
-        <p class="h3">offizielles™ {{ default_data.event_name }}-Telefonbuch:</p>
+        <p class="h3">gesamtes {{ default_data.event_name }}-Telefonbuch:</p>
     </div>
 
     <!-- Suchfeld -->
@@ -26,24 +26,58 @@
         <table class="table table-striped" id="phonebook">
             <thead>
                 <tr class="table-primary">
-                    <th scope="col" class="col-2">Rufnummer</th>
+                    <th scope="col" class="col-1">Rufnummer</th>
                     <th scope="col" class="col-2">Name</th>
-                    <th scope="col">Info</th>
+                    <th scope="col" class="col-2">Info</th>
+                    <th scope="col" class="col-1">Erstellt von</th>
+                    <th scope="col" class="col-1">Öffentlich Sichtbar?</th>
+                    <th scope="col" class="col-1">Aktionen</th>
                 </tr>
             </thead>
             <tbody>
 
             {% for ext in exts %}
                 <tr>
-                    <td>{{ ext.extension | e }}</td>
-                    <td>{{ ext.name | e }}</td>
-                    <td>{{ ext.info | e }}</td>
+                    <td>{{ext.extension}}</td>
+                    <td>{{ext.name}}</td>
+                    <td>{{ext.info}}</td>
+                    <td>{{ext.user_id}}</td>
+                    <td>{% if ext.public %}Ja{% else %}Nein{% endif %}</td>
+                    <td>
+                        <button title="Löschen" type="submit" class="btn btn-danger" onclick="delEntry('{{ext.extension}}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
                 </tr>
             {% endfor %}
 
             </tbody>
         </table>
     </div>
+
+    <!-- Deleting Number -->
+    <script>
+    async function delEntry(extension) {
+
+        var entry = {
+            extension: extension,
+        };
+
+        fetch(`${window.origin}/myextensions/`, {
+            method: "DELETE",
+            credentials: "include",
+            body: JSON.stringify(entry),
+            cache: "no-cache",
+            headers: new Headers({
+                "content-type": "application/json"
+            })
+        })
+        .then(() => {
+            window.location.reload();
+        })
+    }
+    </script>
+
 
     <!-- Searching JS -->
 

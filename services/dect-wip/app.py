@@ -15,6 +15,7 @@ from database import db # database object
 from database import UserExtension,TempExtension,User # database models
 from tools.confighelper import DectWIPConfig
 
+from database import UserExtension,TempExtension,User,ReservedExtensions # database models
 scheduler = APScheduler()
 login_manager = LoginManager()
 
@@ -61,7 +62,9 @@ def getUserExtensions(filterByUserId: User.id | None, searchFor: str | None, sho
 
     return db.session.execute(query).scalars().all()
 
-
+def getUsers() -> list:
+    users = db.session.execute(db.select(User)).scalars().all()
+    return users
 
 ## Routes
 
@@ -160,10 +163,103 @@ def admin():
     cu = db.session.execute(db.select(User).where(User.id==current_user.id)).scalar_one()
     
     if cu.is_admin: 
-        return "<p>Hello, Admin!</p>"
+        return redirect("/admin/phonebook", code=302)
     else:
         return abort(403)
 
+@app.route('/admin/phonebook', methods=['GET'])
+@login_required
+def admin_phonebook():
+    cu = db.session.execute(db.select(User).where(User.id==current_user.id)).scalar_one()
+    
+    if cu.is_admin: 
+        exts = getUserExtensions(filterByUserId=None,searchFor=None,showPublicOnly=False)
+        return render_template('admin.phonebook.html.j2', default_data=fetch_default_data_for_templates(), exts=exts)
+    else:
+        return abort(403)
+
+@app.route('/admin/reservedextensions', methods=['GET', 'DELETE', 'POST'])
+@login_required
+def admin_reservedextensions():
+    cu = db.session.execute(db.select(User).where(User.id==current_user.id)).scalar_one()
+    
+    if cu.is_admin:
+        if request.method == 'DELETE':
+            req_json = request.get_json()
+            selection = db.select(ReservedExtensions).filter_by(start = req_json['start'], end = req_json['end'])
+            extension = db.session.execute(selection).first()
+
+            extension = extension[0]
+            
+            db.session.delete(extension)
+            try:
+                db.session.commit()
+
+                response = make_response(jsonify( {"message": "range deleted"}), 200)
+                return response
+            except:
+                response = make_response(jsonify( {"message": "range could be deleted"}), 400)
+                return response
+        elif request.method == 'POST':
+            req_json = request.get_json()
+            extension = ReservedExtensions(start = req_json['start'], end = req_json['end'])
+            
+            db.session.add(extension)
+            try:
+                db.session.commit()
+
+                response = make_response(jsonify( {"message": "range added"}), 200)
+                return response
+            except:
+                response = make_response(jsonify( {"message": "range could be added"}), 400)
+                return response
+        else:
+            return render_template('admin.reservedextensions.html.j2', default_data=fetch_default_data_for_templates(), exts=db.session.execute(db.select(ReservedExtensions)).scalars().all())
+    else:
+        return abort(403)
+
+@app.route('/admin/users', methods=['GET', 'DELETE', 'POST'])
+@login_required
+def admin_users():
+    cu = db.session.execute(db.select(User).where(User.id==current_user.id)).scalar_one()
+    
+    if cu.is_admin: 
+        if request.method == 'DELETE':
+            req_json = request.get_json()
+            selection = db.select(User).filter_by(id = req_json['id'])
+            user = db.session.execute(selection).first()
+
+            user = user[0]
+
+            db.session.delete(user)
+            try:
+                db.session.commit()
+
+                response = make_response(jsonify( {"message": "user deleted"}), 200)
+                return response
+            except:
+                response = make_response(jsonify( {"message": "user could be deleted. do they still have extensions?"}), 400)
+                return response
+        if request.method == 'POST':
+            req_json = request.get_json()
+            action = req_json['action']
+            if action == "impersonate":
+                selection = db.select(User).filter_by(id = req_json['id'])
+                user = db.session.execute(selection).scalar_one_or_none()
+
+                login_user(user, remember=True, duration=timedelta(days=1))
+                return redirect("/myextensions/", code=302)
+            elif action == "set_admin":
+                db.session.execute(db.update(User).filter_by(id = req_json['id']).values(is_admin=req_json['value']))
+                db.session.commit()
+                response = make_response(jsonify( {"message": "user admin changed"}), 200)
+                return response
+        else:
+            users = getUsers()
+            print(users)
+            return render_template('admin.users.html.j2', default_data=fetch_default_data_for_templates(), users=users)
+    else:
+        return abort(403)
 
 @app.route('/logout/', methods=['GET'])
 def logout():
@@ -179,13 +275,70 @@ def phonebook():
     return render_template('phonebook.html.j2', default_data=fetch_default_data_for_templates(), exts=exts)
 
 
-@app.route('/myextensions/', methods=['GET'])
+@app.route('/myextensions/', methods=['GET', 'POST', 'DELETE'])
 @login_required
 def myextensions():
     exts = getUserExtensions(filterByUserId=current_user.id, searchFor=None, showPublicOnly=False)
 
-    return render_template('myextensions.html.j2', default_data=fetch_default_data_for_templates(), exts=exts)
+    if request.method == 'POST':
+        req_json = request.get_json()
+        ext = UserExtension()
 
+        ext.extension = html.escape(req_json['extension'])
+        ext.password = utilities.getRandomNumber(20)
+        ext.name = html.escape(req_json['name'])
+        ext.info = html.escape(req_json['info'])
+        ext.public = bool(req_json['public'])
+        ext.token = f'{token_prefix}{utilities.getRandomNumber(token_random_count)}'
+        ext.user_id = current_user.id
+
+        if len(ext.extension) == 4 and ext.extension.isdigit() and int(ext.extension[:1]) > 0:
+            try:
+
+                query = db.select(ReservedExtensions).filter(ReservedExtensions.start <= str(ext.extension)).filter(ReservedExtensions.end >= str(ext.extension))
+                if len(db.session.execute(query).scalars().all()) != 0:
+                    response = make_response(jsonify( {"message": "extension is in reserved range"}), 400)
+                else:
+                    db.session.add(ext)
+                    db.session.commit()
+
+                    response = make_response(jsonify( {"message": "extension added"}), 200)
+            except:
+                response = make_response(jsonify( {"message": "extension can't be added. Do you need a voucher?"}), 400)
+
+
+        else:
+            response = make_response(jsonify( {"message": "you need 4 digits"}), 400)
+        return response
+
+    if request.method == 'DELETE':
+
+        req_json = request.get_json()
+        selection = db.select(UserExtension).filter_by(extension = req_json['extension'])
+        ext = db.session.execute(selection).first()
+
+        ext = ext[0]
+
+        if current_user.is_admin or ext.user_id == current_user.id:
+            db.session.delete(ext)
+            db.session.commit()
+
+            response = make_response(jsonify( {"message": "extension deleted"}), 200)
+        else:
+            response = make_response(jsonify( {"message": "extension not owned by user"}), 403)
+        return response
+
+    if request.method == 'GET':
+        exts = getUserExtensions(filterByUserId=current_user.id,searchFor=None,showPublicOnly=False)
+
+        infobox_file = os.path.join(app.instance_path, "infobox.html")
+
+        infobox_content = None
+        if os.path.exists(infobox_file):
+            with open(infobox_file, "r", encoding="utf-8") as f:
+                infobox_content = f.read()
+
+        return render_template('myextensions.html.j2', default_data=fetch_default_data_for_templates(), exts=exts, infobox_content=infobox_content)
 
 ## API V1
 

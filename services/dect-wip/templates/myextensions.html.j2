@@ -1,3 +1,5 @@
+{% set path = 'myextensions' %}
+
 {% extends 'base.html.j2' %}
 
 {% block content %}
@@ -9,17 +11,13 @@
 </div>
 
 
-<!-- tmp -->
+{% if infobox_content %}
 <div class="container-xl mt-3 mb-3">
   <div class="alert alert-info" role="alert">
-    Experimenteller SIP-Zugang<br>
-    Username: $Rufnummer<br>
-    Passwort: $SIP-Passwort<br>
-    Realm/Domain: sip.dect.site<br>
-    Port: 5060<br>
-    Transport: udp<br>
+    {{ infobox_content | replace('\n', '<br>') | safe }}
   </div>
 </div>
+{% endif %}
 
 
 <!-- Übersicht -->
@@ -53,7 +51,7 @@
                 <td>{{ ext.password | e }}</td>
                 <td>{{ ext.info | e }}</td>
             <td>
-                    <button type="submit" class="btn btn-danger" onclick="delEntry('{{ ext.extension | e }}')">
+                    <button title="Löschen" type="submit" class="btn btn-danger" onclick="delEntry('{{ext.extension | e}}')">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
